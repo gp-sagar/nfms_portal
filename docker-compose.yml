@@ -1,12 +1,42 @@
 version: '3.8'
 
 services:
-  my_project:
+  web:
     build: .
-    ports:
-      - "8000:8000"  # Example port mapping, adjust as needed
+    command: python celery_task.py
     volumes:
-      - .:/app
-    # environment:
-    #   - ENV_VARIABLE=value  # Example environment variable, add more as needed
-    restart: always  # Restart policy, adjust as needed
+      - .:/usr/src/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+
+  celery:
+    build: .
+    command: celery -A celery_task worker --loglevel=info
+    volumes:
+      - .:/usr/src/app
+    env_file:
+      - .env
+
+  beat:
+    build: .
+    command: celery -A celery_task beat --loglevel=info
+    volumes:
+      - .:/usr/src/app
+    env_file:
+      - .env
+
+  flower:
+    image: mher/flower
+    command: celery -A celery_task flower
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+
+  
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6380:6379"    
