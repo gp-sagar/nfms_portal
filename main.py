@@ -11,7 +11,7 @@ app.config_from_object('settings')
 # Configure periodic tasks
 app.conf.beat_schedule = {
     'BlockloadAPI-task': {
-        'task': 'apps.BlockloadAPI.BlockloadTask',
+        'task': 'apps.BlockloadAPI.BlockloadAPICall',
         'schedule': crontab(minute='*/1'),
     },
     # 'DailyloadAPI-task': {
@@ -19,4 +19,4 @@ app.conf.beat_schedule = {
     #     'schedule': crontab(minute='*/1'),
     # },
 }
-BlockloadTask()
+# BlockloadTask()

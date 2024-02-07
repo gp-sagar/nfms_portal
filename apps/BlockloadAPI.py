@@ -10,40 +10,57 @@ from settings import API_HEADER as HEADERS
 from settings import get_time_shift
 from datetime import datetime, timezone, timedelta
 from db.models import Session, FeederMasteData, MdmBlockload
+from celery_task import app
+from celery.exceptions import MaxRetriesExceededError
 
 load_dotenv()
 utc_timezone = pytz.utc
 ist_timezone = pytz.timezone('Asia/Kolkata') 
 
-# @app.task
-def BlockloadTask(): # Task is Start from Here
-    # Get Feeder Master Data
-    meters_list, data_as_dicts = GetFeederMasterData()
-    # Get BlockLoad Data
-    payload_dict = GetBlockloadData(meters_list, data_as_dicts)
-    # Data Process for Body Request
-    resp_body = ProcessData(payload_dict)
-    # Calling API
-    BlockloadAPICall(resp_body)
-    
-# Calling API
-def BlockloadAPICall(resp_body):
-    API_URL = os.getenv('BLOCKLOAD_API')
-    AUTH = HTTPBasicAuth(os.getenv('API_USERNAME'), os.getenv('API_PASSWORD'))
-    for i in resp_body:
-        response = requests.post(API_URL, headers=HEADERS, auth=AUTH, json=i, verify='/etc/ssl/certs/')
-        print(f'response :: {response}')
-        if response.status_code == 200:
-            print("Request successful!")
-            print("BlockloadAPI fetching...")
-            print(response.json())
-        elif response.status_code == 429 or response.status_code == 502:
-            print("You Need To Retry this task")
-        else:
-            print(f"Request failed with status code {response.status_code}: {response.text}")
+
+
+
+@app.task(bind=True, max_retries=3, name='BlockloadTask')
+def BlockloadTask(self):
+    try:
+        meters_list, data_as_dicts = GetFeederMasterData()
+        payload_dict = GetBlockloadData(meters_list, data_as_dicts)
+        resp_body = ProcessData(payload_dict)
+        payload = json.dumps(resp_body)
         
-        # TODO Remove the break for api call of all feeder meter
-        # break
+        API_URL = os.getenv('BLOCKLOAD_API')
+        AUTH = HTTPBasicAuth(os.getenv('API_USERNAME'), os.getenv('API_PASSWORD'))
+
+        # Loop through the payloads and make API calls
+        for i in json.loads(payload):
+            response = requests.post(API_URL, headers={'Content-Type': 'application/json'}, auth=AUTH, json=i, verify=False)
+            if response.status_code != 200:
+                # If any call fails, determine the countdown for the retry based on the retry attempt number
+                retry_intervals = [30, 60, 180]  # Define retry intervals in seconds
+                retry_count = self.request.retries
+                countdown = retry_intervals[min(retry_count, len(retry_intervals)-1)]
+                raise self.retry(countdown=countdown, exc=Exception(f"API call failed with status code {response.status_code}, retrying in {countdown} seconds..."))
+
+        # If all API calls were successful, log and return success
+        print("All API calls successful.")
+        return "Completed successfully"
+
+    except Exception as exc:
+        try:
+            # If it's not the last retry, Celery will handle this block and schedule the next retry
+            # The countdown for the retry is set in the raise statement above
+            raise self.retry(exc=exc)
+        except MaxRetriesExceededError:
+            # Handle the failure after the final retry attempt
+            print("Maximum retry attempts reached, task failed.")
+            # Optionally perform any cleanup or failure notification here
+            # The task will be marked as failed in Flower automatically
+
+
+
+
+
+
         
 # Get Feeder Master Data
 def GetFeederMasterData():
