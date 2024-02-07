@@ -12,55 +12,57 @@ from datetime import datetime, timezone, timedelta
 from db.models import Session, FeederMasteData, MdmBlockload
 from celery_task import app
 from celery.exceptions import MaxRetriesExceededError
+from requests.exceptions import HTTPError
+from celery.utils.log import get_task_logger
 
 load_dotenv()
 utc_timezone = pytz.utc
 ist_timezone = pytz.timezone('Asia/Kolkata') 
 
-
+logger = get_task_logger(__name__)
 
 
 @app.task(bind=True, max_retries=3, name='BlockloadTask')
 def BlockloadTask(self):
+    # Example functions to get data for the API call
+    meters_list, data_as_dicts = GetFeederMasterData()
+    payload_dict = GetBlockloadData(meters_list, data_as_dicts)
+    resp_body = ProcessData(payload_dict)
+    payload = json.dumps(resp_body)
+    logger.info(payload)
+    
+    # API call configuration
+    API_URL = os.getenv('BLOCKLOAD_API')
+    AUTH = HTTPBasicAuth(os.getenv('API_USERNAME'), os.getenv('API_PASSWORD'))
+    headers = {'Content-Type': 'application/json'}  # Adjust as needed
+
     try:
-        meters_list, data_as_dicts = GetFeederMasterData()
-        payload_dict = GetBlockloadData(meters_list, data_as_dicts)
-        resp_body = ProcessData(payload_dict)
-        payload = json.dumps(resp_body)
-        
-        API_URL = os.getenv('BLOCKLOAD_API')
-        AUTH = HTTPBasicAuth(os.getenv('API_USERNAME'), os.getenv('API_PASSWORD'))
-
-        # Loop through the payloads and make API calls
         for i in json.loads(payload):
-            response = requests.post(API_URL, headers={'Content-Type': 'application/json'}, auth=AUTH, json=i, verify=False)
-            if response.status_code != 200:
-                # If any call fails, determine the countdown for the retry based on the retry attempt number
-                retry_intervals = [30, 60, 180]  # Define retry intervals in seconds
-                retry_count = self.request.retries
-                countdown = retry_intervals[min(retry_count, len(retry_intervals)-1)]
-                raise self.retry(countdown=countdown, exc=Exception(f"API call failed with status code {response.status_code}, retrying in {countdown} seconds..."))
-
-        # If all API calls were successful, log and return success
-        print("All API calls successful.")
-        return "Completed successfully"
-
-    except Exception as exc:
+            response = requests.post(API_URL, headers=headers, auth=AUTH, json=i, verify=False)
+            if response.status_code == 200:
+                logger.info("Request successful!")
+                logger.info(f"BlockloadAPI fetching: {response.json()}")
+            elif response.status_code in [429, 502,504]:
+                # If specific status codes are encountered, retry the task
+                raise HTTPError(f"Retry due to response status code: {response.status_code}")
+            else:
+                # For other non-success status codes, raise an exception to fail the task
+                response.raise_for_status()
+    except HTTPError as exc:
+        # Handle retries for specific HTTP errors
         try:
-            # If it's not the last retry, Celery will handle this block and schedule the next retry
-            # The countdown for the retry is set in the raise statement above
-            raise self.retry(exc=exc)
+            retry_intervals = [30, 60, 180]  # Define retry intervals
+            retry_count = self.request.retries
+            retry_time = retry_intervals[min(retry_count, len(retry_intervals) - 1)]
+            logger.info(f"Retrying in {retry_time} seconds due to HTTPError...")
+            self.retry(exc=exc, countdown=retry_time)
         except MaxRetriesExceededError:
-            # Handle the failure after the final retry attempt
-            print("Maximum retry attempts reached, task failed.")
-            # Optionally perform any cleanup or failure notification here
-            # The task will be marked as failed in Flower automatically
-
-
-
-
-
-
+            logger.error("Maximum retries exceeded due to HTTPError, task marked as failed.")
+            raise exc
+    except Exception as exc:
+        # Handle other exceptions, potentially non-HTTP errors
+        logger.error(f"Unhandled exception occurred: {exc}")
+        raise exc  # Raising the exception marks the task as failed in Flower
         
 # Get Feeder Master Data
 def GetFeederMasterData():
