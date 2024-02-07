@@ -3,7 +3,7 @@
 
 API's Integrate with recpdcl and show the data on NFMS Portal.
 
-API Link:
+API Name:
 - BlockLoad
 - DailyLoad
 - Alarm
