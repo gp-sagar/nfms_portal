@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from settings import get_time_shift
 from datetime import datetime, timezone, timedelta
 from db.models import Session, MdmBlockload
+from sqlalchemy import func
 
 load_dotenv()
 utc_timezone = pytz.utc
@@ -29,11 +30,11 @@ def GetBlockloadData(meter_id : list, data_as_dicts):
     try:
         today_date = datetime.now()
         start_date_str = (today_date - timedelta(days=1)).strftime('%Y-%m-%d 00:30:00')
-        strt_time_obj = datetime.strptime(start_date_str, '%Y-%m-%d %H:%M:%S')
-        strt_time_obj_utc = strt_time_obj.replace(tzinfo=timezone.utc)
+        # strt_time_obj = datetime.strptime(start_date_str, '%Y-%m-%d %H:%M:%S')
+        # strt_time_obj_utc = strt_time_obj.replace(tzinfo=timezone.utc)
         end_date_str = today_date.strftime('%Y-%m-%d 00:00:00')
-        end_time_obj = datetime.strptime(end_date_str, '%Y-%m-%d %H:%M:%S')
-        end_time_obj_utc = end_time_obj.replace(tzinfo=timezone.utc)
+        # end_time_obj = datetime.strptime(end_date_str, '%Y-%m-%d %H:%M:%S')
+        # end_time_obj_utc = end_time_obj.replace(tzinfo=timezone.utc)
 
         data_from_db = (
             session.query(
@@ -41,11 +42,41 @@ def GetBlockloadData(meter_id : list, data_as_dicts):
             )
             .filter(
                 MdmBlockload.meter_id.in_(meter_id),
-                MdmBlockload.data_timestamp >= strt_time_obj_utc,
-                MdmBlockload.data_timestamp <= end_time_obj_utc,
+                # MdmBlockload.data_timestamp >= strt_time_obj_utc,
+                # MdmBlockload.data_timestamp <= end_time_obj_utc,
+                func.jsonb_extract_path_text(MdmBlockload.data, 'blockload_datetime') >= start_date_str,
+                func.jsonb_extract_path_text(MdmBlockload.data, 'blockload_datetime') <= end_date_str
             ).all()
         )
-        list_of_dict = [item[0] for item in data_from_db]
+        # list_of_dict = [item[0] for item in data_from_db]
+        meter_list = []
+        list_of_dict = [item[0] for item in data_from_db if (item[0]['meter_number'] not in meter_list) and (meter_list.append(item[0]['meter_number']) or True)]
+
+        # Check how many meters data is not received from DB
+        if len(meter_id) != len(meter_list):
+            meter_data_none = [meter for meter in meter_id if meter not in meter_list]
+            # Blank data is generated for meters from which data has not been received from DB
+            for i in meter_data_none:
+                dummy_data = {
+                    'export_Wh' : 'NA', 
+                    'import_Wh' : 'NA', 
+                    'export_VAh' : 'NA', 
+                    'import_VAh' : 'NA', 
+                    'meter_number' : i, 
+                    'exec_datetime' : 'NA', 
+                    'BN_BLS_volatge' : 'NA', 
+                    'RN_BLS_volatge' : 'NA', 
+                    'YN_BLS_volatge' : 'NA', 
+                    'Bphase_BLS_current' : 'NA', 
+                    'Rphase_BLS_current' : 'NA', 
+                    'Yphase_BLS_current' : 'NA', 
+                    'blockload_datetime' : 'NA', 
+                    'reactive_energy_Q1' : 'NA', 
+                    'reactive_energy_Q2' : 'NA', 
+                    'reactive_energy_Q3' : 'NA', 
+                    'reactive_energy_Q4' : 'NA'
+                }
+                list_of_dict.append(dummy_data)
 
         final_dict = {}
         for i in data_as_dicts:
@@ -97,24 +128,28 @@ def ProcessData(final_dict):
             "LoadProfile": [
                 {
                     "sequence": 1,
-                    "R_Voltage": float(entry["RN_BLS_volatge"]),
-                    "Y_Voltage": float(entry["YN_BLS_volatge"]),
-                    "B_Voltage": float(entry["BN_BLS_volatge"]),
-                    "R_Current": float(entry["Rphase_BLS_current"]),
-                    "Y_Current": float(entry["Yphase_BLS_current"]),
-                    "B_Current": float(entry["Bphase_BLS_current"]),
-                    "block_kWh": float(entry["import_Wh"]),
-                    "block_kVAh": float(entry["export_Wh"]),
+                    "R_Voltage": entry["RN_BLS_volatge"],
+                    "Y_Voltage": entry["YN_BLS_volatge"],
+                    "B_Voltage": entry["BN_BLS_volatge"],
+                    "R_Current": entry["Rphase_BLS_current"],
+                    "Y_Current": entry["Yphase_BLS_current"],
+                    "B_Current": entry["Bphase_BLS_current"],
+                    "block_kWh": entry["import_Wh"],
+                    "block_kVAh": entry["export_Wh"],
                     "block_kVArh_lag": "NA",
                     "block_kVArh_lead": "NA",
-                    "meter_rtc": entry["blockload_datetime"]
+                    "meter_rtc": entry.get("blockload_datetime", "NA")
                 }
                 for entry in final_dict[i]["LoadProfile"]
             ]
         }
         # Meter RTC time
-        for entry in payload_dict['LoadProfile']:
-            entry['meter_rtc'] = subtract_time(entry['meter_rtc'])
+        # for entry in payload_dict['LoadProfile']:
+        #     try:
+        #         entry['meter_rtc'] = subtract_time(entry['meter_rtc'])
+        #         print(entry['meter_rtc'])
+        #     except Exception as e:
+        #         print(e)
     
     # Check All Blocks are available or not, if not then fill the blank data
         new_load_profile = GetBlankData(payload_dict)
