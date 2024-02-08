@@ -69,11 +69,30 @@ class MdmBlockload(Base):
     __tablename__ = 'mdm_blockload'
 
     id = Column(Integer, primary_key=True)
-    data = Column(JSON)  # Assuming data is stored as JSON
+    data = Column(JSON)
     meter_id = Column(Integer)
     data_timestamp = Column(DateTime)
     create_timestamp = Column(DateTime)
-    data_source = Column(String)  # Adjust the length if needed
+    data_source = Column(String)
+
+class MdmDailyload(Base):
+    __tablename__ = 'mdm_dailyload'
+
+    id = Column(Integer, primary_key=True)
+    data = Column(JSON)
+    meter_id = Column(Integer)
+    data_timestamp = Column(DateTime)
+    create_timestamp = Column(DateTime)
+    
+class MdmBilling(Base):
+    __tablename__ = 'mdm_billinghistory'
+
+    id = Column(Integer, primary_key=True)
+    data = Column(JSON)
+    meter_id = Column(Integer)
+    data_timestamp = Column(DateTime)
+    create_timestamp = Column(DateTime)
+
 
 engine = create_engine(os.getenv('DATABASE_URL'))
 Session = sessionmaker(bind=engine)

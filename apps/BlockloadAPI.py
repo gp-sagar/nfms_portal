@@ -1,12 +1,8 @@
-import os
 import pytz
 import uuid
-import json
-import requests
 # from main import app
+from constants import GetFeederMasterData, API_Calling
 from dotenv import load_dotenv
-from requests.auth import HTTPBasicAuth
-from settings import API_HEADER as HEADERS
 from settings import get_time_shift
 from datetime import datetime, timezone, timedelta
 from db.models import Session, FeederMasteData, MdmBlockload
